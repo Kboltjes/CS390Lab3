@@ -9,6 +9,15 @@ from scipy.optimize import fmin_l_bfgs_b   # https://docs.scipy.org/doc/scipy/re
 from tensorflow.keras.applications import vgg19
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 import warnings
+tf.compat.v1.disable_eager_execution()
+
+# Links Used:
+# https://blog.keras.io/category/demo.html
+# https://docs.scipy.org/doc/scipy-1.2.1/reference/generated/scipy.misc.imresize.html
+# https://stackoverflow.com/questions/49834380/k-gradientsloss-input-img0-return-none-keras-cnn-visualization-with-ten
+# https://stackoverflow.com/questions/66221788/tf-gradients-is-not-supported-when-eager-execution-is-enabled-use-tf-gradientta/66222183
+# https://stackoverflow.com/questions/44552585/prevent-tensorflow-from-accessing-the-gpu
+# https://www.programcreek.com/python/example/66755/scipy.optimize.fmin_l_bfgs_b
 
 random.seed(1618)
 np.random.seed(1618)
@@ -18,12 +27,14 @@ tf.random.set_seed(1618)
 #tf.logging.set_verbosity(tf.logging.ERROR)   # Uncomment for TF1.
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-CONTENT_IMG_PATH = ""           #TODO: Add this.
-STYLE_IMG_PATH = ""             #TODO: Add this.
-
+REFERENCE_IMAGE_DIR = "ReferenceImages/"
+CONTENT_IMG_PATH = REFERENCE_IMAGE_DIR + "NightSkyWithTrees.jpg"
+STYLE_IMG_PATH = REFERENCE_IMAGE_DIR + "outerwildsPainting2.jpg"
+MAX_ITER = 3000
 
 CONTENT_IMG_H = 500
 CONTENT_IMG_W = 500
+CONTENT_IMG_D = 3
 
 STYLE_IMG_H = 500
 STYLE_IMG_W = 500
@@ -42,7 +53,7 @@ TODO: implement this.
 This function should take the tensor and re-convert it to an image.
 '''
 def deprocessImage(img):
-    return img
+    return img.reshape(CONTENT_IMG_H, CONTENT_IMG_W, CONTENT_IMG_D)
 
 
 def gramMatrix(x):
@@ -55,21 +66,20 @@ def gramMatrix(x):
 #========================<Loss Function Builder Functions>======================
 
 def styleLoss(style, gen):
-    return None   #TODO: implement.
+    return STYLE_WEIGHT * (K.sum(K.square(gramMatrix(style) - gramMatrix(gen))) / (4. * (CONTENT_IMG_D**2) * ((STYLE_IMG_H * STYLE_IMG_W)**2)))
 
 
 def contentLoss(content, gen):
-    return K.sum(K.square(gen - content))
+    return CONTENT_WEIGHT * K.sum(K.square(gen - content))
 
 
 def totalLoss(x):
-    return None   #TODO: implement.
-
-
-
+    return None
 
 
 #=========================<Pipeline Functions>==================================
+
+
 
 def getRawData():
     print("   Loading images.")
@@ -95,8 +105,24 @@ def preprocessData(raw):
     return img
 
 
+class Evaluator(object):
+    def __init__(self, inTensor, outputs):
+        self.inTensor = inTensor
+        self.outputs = outputs
+        self.gradient_values = None
+
+    def loss(self, point):
+        kfunc = K.function([self.inTensor], self.outputs)
+        out = kfunc(point)
+        loss_value, self.gradient_values = out[0], out[1]
+        return loss_value
+
+    def grads(self, point):
+        return self.gradient_values
+
+
 '''
-TODO: Allot of stuff needs to be implemented in this function.
+TODO: Alot of stuff needs to be implemented in this function.
 First, make sure the model is set up properly.
 Then construct the loss function (from content and style loss).
 Gradient functions will also need to be created, or you can use K.Gradients().
@@ -105,11 +131,12 @@ Save the newly generated and deprocessed images.
 '''
 def styleTransfer(cData, sData, tData):
     print("   Building transfer model.")
-    contentTensor = K.variable(cData)
-    styleTensor = K.variable(sData)
-    genTensor = K.placeholder((1, CONTENT_IMG_H, CONTENT_IMG_W, 3))
+    contentTensor = K.variable(cData, dtype=tf.float64)
+    styleTensor = K.variable(sData, dtype=tf.float64)
+    flatTensor = K.placeholder(CONTENT_IMG_H * CONTENT_IMG_W * 3, name="testing1", dtype=tf.float64)
+    genTensor = K.reshape(flatTensor, (1, CONTENT_IMG_H, CONTENT_IMG_W, 3))
     inputTensor = K.concatenate([contentTensor, styleTensor, genTensor], axis=0)
-    model = None   #TODO: implement.
+    model = vgg19.VGG19(include_top=False, weights="imagenet", input_tensor=inputTensor)
     outputDict = dict([(layer.name, layer.output) for layer in model.layers])
     print("   VGG19 model loaded.")
     loss = 0.0
@@ -119,20 +146,29 @@ def styleTransfer(cData, sData, tData):
     contentLayer = outputDict[contentLayerName]
     contentOutput = contentLayer[0, :, :, :]
     genOutput = contentLayer[2, :, :, :]
-    loss += None   #TODO: implement.
+    loss += contentLoss(contentOutput, genOutput)
     print("   Calculating style loss.")
     for layerName in styleLayerNames:
-        loss += None   #TODO: implement.
-    loss += None   #TODO: implement.
-    # TODO: Setup gradients or use K.gradients().
+        styleLayer = outputDict[layerName]
+        styleOutput = styleLayer[1, :, :, :]
+        styleGenOutput = styleLayer[2, :, :, :]
+        loss += styleLoss(styleOutput, styleGenOutput)
+
+    grads = K.gradients(loss, flatTensor)[0]
+    outputs = [loss]
+    outputs.append(grads)
+    evaluator = Evaluator(flatTensor, outputs)
+
     print("   Beginning transfer.")
     for i in range(TRANSFER_ROUNDS):
         print("   Step %d." % i)
-        #TODO: perform gradient descent using fmin_l_bfgs_b.
+        x, tLoss, info = fmin_l_bfgs_b(evaluator.loss, x0=tData.flatten(), maxiter=MAX_ITER, fprime=evaluator.grads)
         print("      Loss: %f." % tLoss)
+
         img = deprocessImage(x)
-        saveFile = None   #TODO: Implement.
-        #imsave(saveFile, img)   #Uncomment when everything is working right.
+
+        saveFile = f"finishedImg{i}.png"
+        imsave(saveFile, img)
         print("      Image saved to \"%s\"." % saveFile)
     print("   Transfer complete.")
 
