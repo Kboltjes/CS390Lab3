@@ -28,8 +28,8 @@ tf.random.set_seed(1618)
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 REFERENCE_IMAGE_DIR = "ReferenceImages/"
-CONTENT_IMG_PATH = REFERENCE_IMAGE_DIR + "NightSkyWithTrees.jpg"
-STYLE_IMG_PATH = REFERENCE_IMAGE_DIR + "outerwildsPainting2.jpg"
+CONTENT_IMG_PATH = REFERENCE_IMAGE_DIR + "PurdueGateway.jpg"
+STYLE_IMG_PATH = REFERENCE_IMAGE_DIR + "starryNight.jpg"
 MAX_ITER = 3000
 
 CONTENT_IMG_H = 500
